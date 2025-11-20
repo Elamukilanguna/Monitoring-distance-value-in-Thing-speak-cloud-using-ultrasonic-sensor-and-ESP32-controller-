@@ -99,200 +99,70 @@ Prototype and build IoT systems without setting up servers or developing web sof
 
  
 # PROGRAM:
-```
-#include <Adafruit_Sensor.h>
+```#include "ThingSpeak.h"
+#include <WiFi.h>
+char ssid[] = "Poco M2 Pro"; //SSID
+char pass[] = "Chandru@17"; // Password
+const int trigger = 2;
+const int echo = 26;
+long T;
+float distanceCM;
+WiFiClient  client;
 
-#include <SoftwareSerial.h>
-#include <Adafruit_Sensor.h>
-#include <DHT.h>
-#include <DHT_U.h>
+unsigned long myChannelField = 3128330; // Channel ID
+const int ChannelField = 1; // Which channel to write data
+const char * myWriteAPIKey = "6130E9HO311X7UCI"; // Your write API Key
 
-#define DHTPIN 9                 // Digital pin connected to the DHT sensor 
-#define DHTTYPE    DHT11         // DHT 11
-
-DHT_Unified dht(DHTPIN, DHTTYPE);
-SoftwareSerial ss(10, 11);       // Arduino RX, TX ,
-
-String inputString = "";         // a String to hold incoming data
-bool stringComplete = false;     // whether the string is complete
-long old_time=millis();
-long new_time;
-long uplink_interval=30000;      //ms
-bool time_to_at_recvb=false;
-bool get_LA66_data_status=false;
-bool network_joined_status=false;
-float DHT11_temp;
-float DHT11_hum;
-char rxbuff[128];
-uint8_t rxbuff_index=0;
-
-void setup() {
-  // initialize serial
-  Serial.begin(9600);
-   ss.begin(9600);
-  ss.listen();
-  // reserve 200 bytes for the inputString:
-  inputString.reserve(200);
-  dht.begin();
-  sensor_t sensor;
-  dht.temperature().getSensor(&sensor);
-  dht.humidity().getSensor(&sensor);
-   ss.println("ATZ");//reset LA66
+void setup()
+{
+  Serial.begin(115200);
+  pinMode(trigger, OUTPUT);
+  pinMode(echo, INPUT);
+  WiFi.mode(WIFI_STA);
+  ThingSpeak.begin(client);
+}
+void loop()
+{
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print("Attempting to connect to SSID: ");
+    Serial.println(ssid);
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      WiFi.begin(ssid, pass);
+      Serial.print(".");
+      delay(5000);
+    }
+    Serial.println("\nConnected.");
+  }
+  digitalWrite(trigger, LOW);
+  delay(1);
+  digitalWrite(trigger, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigger, LOW);
+  T = pulseIn(echo, HIGH);
+  distanceCM = T * 0.034;
+  distanceCM = distanceCM / 2;
+  Serial.print("Distance in cm: ");
+  Serial.println(distanceCM);
+  ThingSpeak.writeField(myChannelField, ChannelField, distanceCM, myWriteAPIKey);
+  delay(1000);
 }
 
-void loop() {
-  new_time = millis();
-
-  if((new_time-old_time>=uplink_interval)&&(network_joined_status==1)){
-    old_time = new_time;
-    get_LA66_data_status=false;
-
-  // Get temperature event and print its value.
-  sensors_event_t event;
-  dht.temperature().getEvent(&event);
-  if (isnan(event.temperature)) {
-    Serial.println(F("Error reading temperature!"));
-    DHT11_temp=327.67;
-  }
-  else {
-    DHT11_temp=event.temperature;
-    
-    if(DHT11_temp>60){
-      DHT11_temp=60;
-    }
-    else if(DHT11_temp<-20){
-      DHT11_temp=-20;
-    }
-  }
- 
- // Get humidity event and print its value.
-  dht.humidity().getEvent(&event);
-  if (isnan(event.relative_humidity)) {
-    DHT11_hum=327.67;
-    Serial.println(F("Error reading humidity!"));
-  }
-  else {
-    DHT11_hum=event.relative_humidity;
-    
-    if(DHT11_hum>100){
-      DHT11_hum=100;
-    }
-    else if(DHT11_hum<0){
-      DHT11_hum=0;
-    }
-  }
-
-    Serial.print(F("Temperature: "));
-    Serial.print(DHT11_temp);
-    Serial.println(F("°C"));
-    Serial.print(F("Humidity: "));
-    Serial.print(DHT11_hum);
-    Serial.println(F("%"));
-    
-    char sensor_data_buff[128]="\0";
-
-    snprintf(sensor_data_buff,128,"AT+SENDB=%d,%d,%d,%02X%02X%02X%02X",0,2,4,(short)(DHT11_temp*100)>>8 & 0xFF,(short)(DHT11_temp*100) & 0xFF,(short)(DHT11_hum*100)>>8 & 0xFF,(short)(DHT11_hum*100) & 0xFF);
-    
-    ss.println(sensor_data_buff);
-  }
-
-  if(time_to_at_recvb==true){
-    time_to_at_recvb=false;
-    get_LA66_data_status=true;
-    delay(1000);
-    
-    ss.println("AT+CFG");    
-  }
-
-    while ( ss.available()) {
-    // get the new byte:
-    char inChar = (char) ss.read();
-    // add it to the inputString:
-    inputString += inChar;
-
-    rxbuff[rxbuff_index++]=inChar;
-
-    if(rxbuff_index>128)
-    break;
-    
-    // if the incoming character is a newline, set a flag so the main loop can
-    // do something about it:
-    if (inChar == '\n' || inChar == '\r') {
-      stringComplete = true;
-      rxbuff[rxbuff_index]='\0';
-       
-      if(strncmp(rxbuff,"JOINED",6)==0){
-        network_joined_status=1;
-      }
-
-      if(strncmp(rxbuff,"Dragino LA66 Device",19)==0){
-        network_joined_status=0;
-      }
-
-      if(strncmp(rxbuff,"Run AT+RECVB=? to see detail",28)==0){
-        time_to_at_recvb=true;
-        stringComplete=false;
-        inputString = "\0";
-      }
-
-      if(strncmp(rxbuff,"AT+RECVB=",9)==0){       
-        stringComplete=false;
-        inputString = "\0";
-        Serial.print("\r\nGet downlink data(FPort & Payload) ");
-        Serial.println(&rxbuff[9]);
-      }
-      
-      rxbuff_index=0;
-
-      if(get_LA66_data_status==true){
-        stringComplete=false;
-        inputString = "\0";
-      }
-    }
-  }
-
-   while ( Serial.available()) {
-    // get the new byte:
-    char inChar = (char) Serial.read();
-    // add it to the inputString:
-    inputString += inChar;
-    // if the incoming character is a newline, set a flag so the main loop can
-    // do something about it:
-    if (inChar == '\n' || inChar == '\r') {
-      ss.print(inputString);
-      inputString = "\0";
-    }
-  }
-  
-  // print the string when a newline arrives:
-  if (stringComplete) {
-    Serial.print(inputString);
-    
-    // clear the string:
-    inputString = "\0";
-    stringComplete = false;
-  }
-}
-
-
-
-/*function Decoder(bytes,port){
-var Temperature=(bytes[0] << 8 | bytes[1])/100;
-var Humidity=(bytes[2] << 8 | bytes[3])/100;
-return{
-Temperature:Temperature,
-Humidity:Humidity
-};
-}*/
 ```
 # CIRCUIT DIAGRAM:
-<img width="348" height="706" alt="image" src="https://github.com/user-attachments/assets/5d1f72f6-817e-4c2e-8667-03e22b72795f" />
+
+<img width="1204" height="1600" alt="image" src="https://github.com/user-attachments/assets/d4392de4-9046-4392-bccf-275acc65272f" />
+
 
 
 # OUTPUT:
-<img width="1536" height="941" alt="Screenshot 2025-11-14 122328" src="https://github.com/user-attachments/assets/a60e93c1-1685-4a47-9313-c01d598defb9" />
-<img width="1886" height="419" alt="Screenshot 2025-11-14 122347" src="https://github.com/user-attachments/assets/4aa20dc1-32a8-4779-afca-13e0e1026b01" />
-<img width="1602" height="840" alt="Screenshot 2025-11-14 122402" src="https://github.com/user-attachments/assets/f164749a-623d-49f8-8a8c-9c798dffbf20" />
+<img width="1919" height="1079" alt="Screenshot 2025-11-20 083622" src="https://github.com/user-attachments/assets/501e9612-87c7-4d70-9080-9bbfd06ae0e9" />
+
+<img width="323" height="283" alt="Screenshot 2025-11-20 100140" src="https://github.com/user-attachments/assets/6f7ea06b-d1cc-47c8-a196-4b19643fabcc" />
+<img width="904" height="806" alt="Screenshot 2025-11-20 100149" src="https://github.com/user-attachments/assets/2801c258-73b0-4853-ba65-8fbe1777443c" />
+
+
 
 
 
