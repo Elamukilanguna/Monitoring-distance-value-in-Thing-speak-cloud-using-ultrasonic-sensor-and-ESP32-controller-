@@ -1,5 +1,5 @@
-## NAME:CHANDRU P
-## REG NO:212223110007
+## NAME:ELAMUKILAN G
+## REG NO:212223040045
 
 # Monitoring distance value in Thing speak cloud using ultrasonic sensor and ESP32 controller
 
